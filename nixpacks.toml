@@ -1,5 +1,5 @@
 [phases.setup]
-aptPkgs = ["fonts-lato", "fonts-dejavu-core", "fonts-dejavu-extra"]
+aptPkgs = ["fonts-lato", "fonts-dejavu-core", "fonts-dejavu-extra", "fonts-noto", "fonts-noto-core", "fonts-freefont-ttf"]
 
 [start]
 cmd = "python bot.py"
