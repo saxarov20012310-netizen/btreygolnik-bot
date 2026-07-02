@@ -1,5 +1,8 @@
 [phases.setup]
-aptPkgs = ["fonts-lato", "fonts-dejavu-core", "fonts-dejavu-extra", "fonts-noto", "fonts-noto-core", "fonts-freefont-ttf"]
+aptPkgs = ["fonts-noto", "fonts-dejavu-core", "fonts-dejavu-extra"]
+
+[phases.install]
+cmds = ["pip install -r requirements.txt", "playwright install --with-deps chromium"]
 
 [start]
 cmd = "python bot.py"
