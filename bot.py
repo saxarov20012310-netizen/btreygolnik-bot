@@ -31,8 +31,6 @@ FEEDS = [
     "https://cryptopotato.com/feed/",
 ]
 # ── ШРИФТЫ ────────────────────────────────────────────────────────────────────
-# DejaVu — гарантирован на Railway через fonts-dejavu-core
-# Inter — скачивается при старте для красоты
 FONT_DIR = "/tmp/btfonts"
 
 def _dl(url, dest):
@@ -78,6 +76,7 @@ def _fnt(paths, size):
             pass
     log.warning(f"Font fallback @{size}")
     return ImageFont.load_default()
+
 # ── RSS ───────────────────────────────────────────────────────────────────────
 def fetch_articles(n=8):
     articles = []
@@ -95,7 +94,6 @@ def fetch_articles(n=8):
         if len(articles) >= n:
             break
     return articles[:n]
-
 # ── CLAUDE: ГЕНЕРАЦИЯ ПОСТА + ВИЗУАЛА ─────────────────────────────────────────
 SYSTEM_PROMPT = """Ты — редактор Telegram-канала «Белый треугольник | Братство» (@btreygolnik).
 Аудитория: маркетологи 18-28 лет, следят за крипто-трендами и growth hacking.
@@ -128,7 +126,6 @@ def generate_post(articles):
 МЕТКА1: [2-3 слова]
 ЦИФРА2: [метрика, например $160M]
 МЕТКА2: [2-3 слова]
-ЦЕПОЧКА: [A → B → C → D]
 ПРОМПТ: [5-8 слов EN для генерации фона, тема поста, без текста]
 
 Строго два раздела."""}]
@@ -153,11 +150,9 @@ def generate_post(articles):
         "s1l":    ex("МЕТКА1",   "рост"),
         "s2v":    ex("ЦИФРА2",   "$50M"),
         "s2l":    ex("МЕТКА2",   "объём"),
-        "chain":  ex("ЦЕПОЧКА",  "Идея -> Контент -> Трафик -> Деньги"),
         "prompt": ex("ПРОМПТ",   "dark futuristic blockchain technology glowing blue"),
     }
     return post_text, vis
-
 # ── AI ФОТОФОН: Pollinations.ai ───────────────────────────────────────────────
 def generate_bg(vis_prompt: str) -> bytes | None:
     """Бесплатная AI-генерация фона — Pollinations.ai (без API-ключа)"""
@@ -178,11 +173,12 @@ def generate_bg(vis_prompt: str) -> bytes | None:
         r = requests.get(url, timeout=90)
         r.raise_for_status()
         if r.headers.get("content-type", "").startswith("image"):
-            log.info("AI фон получен ✓")
+            log.info("AI фон получен")
             return r.content
     except Exception as e:
         log.warning(f"Pollinations ошибка: {e}")
     return None
+
 def _solid_bg() -> Image.Image:
     """Запасной фон — градиент тёмно-синего"""
     img = Image.new("RGB", (1280, 720), (5, 5, 15))
@@ -206,16 +202,21 @@ def _wrap(draw, text, font, max_w):
             cur = w
     if cur: lines.append(cur)
     return lines
-
 def overlay_text(img: Image.Image, vis: dict) -> Image.Image:
     W, H = 1280, 720
     img = img.convert("RGBA")
 
-    # Тёмный градиент слева (для читаемости текста) — более плотный
+    # Тёмная плашка слева — гарантирует контраст на любом фоне
+    card = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    cd   = ImageDraw.Draw(card)
+    cd.rounded_rectangle([28, 18, 690, 700], radius=18, fill=(4, 5, 18, 195))
+    img = Image.alpha_composite(img, card)
+
+    # Мягкий градиент поверх плашки
     grad = Image.new("RGBA", (W, H), (0, 0, 0, 0))
     gd   = ImageDraw.Draw(grad)
-    for x in range(900):
-        a = int(248 * (1 - x / 900) ** 0.45)
+    for x in range(700):
+        a = int(60 * (1 - x / 700) ** 1.5)
         gd.line([(x, 0), (x, H)], fill=(2, 3, 10, a))
     img = Image.alpha_composite(img, grad)
 
@@ -234,12 +235,13 @@ def overlay_text(img: Image.Image, vis: dict) -> Image.Image:
     img = Image.alpha_composite(img, tri)
 
     draw = ImageDraw.Draw(img)
-    ELEC  = (0,   210, 255)
-    GOLD  = (255, 205,   0)
-    WHT   = (255, 255, 255)
-    MUTED = (180, 185, 210)
-    SEP   = ( 50,  60, 110)
-    LM    = 64
+    BLK  = (0, 0, 0)
+    ELEC = (0,   210, 255)
+    GOLD = (255, 205,   0)
+    WHT  = (255, 255, 255)
+    MUTED= (180, 185, 210)
+    SEP  = ( 50,  60, 110)
+    LM   = 64
 
     f_h1   = _fnt(BOLD_PATHS, 82)
     f_h2   = _fnt(BOLD_PATHS, 82)
@@ -248,46 +250,44 @@ def overlay_text(img: Image.Image, vis: dict) -> Image.Image:
     f_lbl  = _fnt(REG_PATHS,  15)
     f_tag  = _fnt(REG_PATHS,  14)
     f_hand = _fnt(BOLD_PATHS, 17)
-
-    # Метка сверху
     draw.text((LM, 26), "БЕЛЫЙ ТРЕУГОЛЬНИК  \u00b7  МАРКЕТИНГ  \u00b7  @btreygolnik",
-              font=f_tag, fill=MUTED)
+              font=f_tag, fill=MUTED, stroke_width=1, stroke_fill=BLK)
     draw.line([(LM, 52), (W - LM - 100, 52)], fill=SEP, width=1)
 
-    # Заголовок
     y = 72
-    draw.text((LM, y), vis["line1"], font=f_h1, fill=WHT)
+    draw.text((LM, y), vis["line1"], font=f_h1, fill=WHT,
+              stroke_width=2, stroke_fill=BLK)
     y += 92
-    draw.text((LM, y), vis["line2"], font=f_h2, fill=ELEC)
+    draw.text((LM, y), vis["line2"], font=f_h2, fill=ELEC,
+              stroke_width=2, stroke_fill=BLK)
     y += 86
 
-    # "..." + описание
-    draw.text((LM, y), "...", font=f_desc, fill=ELEC)
+    draw.text((LM, y), "...", font=f_desc, fill=ELEC, stroke_width=1, stroke_fill=BLK)
     y += 32
     for line in _wrap(draw, vis["desc"], f_desc, 580)[:2]:
-        draw.text((LM, y), line, font=f_desc, fill=MUTED)
+        draw.text((LM, y), line, font=f_desc, fill=MUTED,
+                  stroke_width=1, stroke_fill=BLK)
         y += 30
 
-    # Статистика
     y += 18
     draw.line([(LM, y), (560, y)], fill=SEP, width=1)
     y += 16
-
-    draw.text((LM, y),       vis["s1v"], font=f_stat, fill=GOLD)
-    draw.text((LM + 200, y), vis["s2v"], font=f_stat, fill=WHT)
+    draw.text((LM, y),       vis["s1v"], font=f_stat, fill=GOLD,
+              stroke_width=2, stroke_fill=BLK)
+    draw.text((LM + 200, y), vis["s2v"], font=f_stat, fill=WHT,
+              stroke_width=2, stroke_fill=BLK)
     y += 58
-    draw.text((LM, y),       vis["s1l"].upper(), font=f_lbl, fill=MUTED)
-    draw.text((LM + 200, y), vis["s2l"].upper(), font=f_lbl, fill=MUTED)
+    draw.text((LM, y),       vis["s1l"].upper(), font=f_lbl, fill=MUTED,
+              stroke_width=1, stroke_fill=BLK)
+    draw.text((LM + 200, y), vis["s2l"].upper(), font=f_lbl, fill=MUTED,
+              stroke_width=1, stroke_fill=BLK)
     draw.line([(LM + 180, y - 50), (LM + 180, y + 14)], fill=SEP, width=1)
 
-    # Цепочка
-    y += 22
-    draw.text((LM, y), vis.get("chain", ""), font=f_tag, fill=MUTED)
-
-    # Нижняя полоса
     draw.line([(LM, H - 50), (W - LM - 100, H - 50)], fill=SEP, width=1)
-    draw.text((LM, H - 34), "@btreygolnik", font=f_hand, fill=ELEC)
-    draw.text((580, H - 32), "маркетинг без воды", font=f_tag, fill=MUTED)
+    draw.text((LM, H - 34), "@btreygolnik", font=f_hand, fill=ELEC,
+              stroke_width=1, stroke_fill=BLK)
+    draw.text((580, H - 32), "маркетинг без воды", font=f_tag, fill=MUTED,
+              stroke_width=1, stroke_fill=BLK)
 
     buf = io.BytesIO()
     img.convert("RGB").save(buf, "PNG")
