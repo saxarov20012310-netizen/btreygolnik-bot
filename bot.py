@@ -153,7 +153,7 @@ def generate_post(articles):
         "s1l":    ex("МЕТКА1",   "рост"),
         "s2v":    ex("ЦИФРА2",   "$50M"),
         "s2l":    ex("МЕТКА2",   "объём"),
-        "chain":  ex("ЦЕПОЧКА",  "Идея → Контент → Трафик → Деньги"),
+        "chain":  ex("ЦЕПОЧКА",  "Идея -> Контент -> Трафик -> Деньги"),
         "prompt": ex("ПРОМПТ",   "dark futuristic blockchain technology glowing blue"),
     }
     return post_text, vis
@@ -187,7 +187,6 @@ def _solid_bg() -> Image.Image:
     """Запасной фон — градиент тёмно-синего"""
     img = Image.new("RGB", (1280, 720), (5, 5, 15))
     draw = ImageDraw.Draw(img)
-    # Диагональный свет
     for i in range(200):
         alpha = int(18 * (1 - i / 200))
         x = 640 + i * 3
@@ -212,12 +211,12 @@ def overlay_text(img: Image.Image, vis: dict) -> Image.Image:
     W, H = 1280, 720
     img = img.convert("RGBA")
 
-    # Тёмный градиент слева (для читаемости текста)
+    # Тёмный градиент слева (для читаемости текста) — более плотный
     grad = Image.new("RGBA", (W, H), (0, 0, 0, 0))
     gd   = ImageDraw.Draw(grad)
-    for x in range(760):
-        a = int(210 * (1 - x / 760) ** 0.6)
-        gd.line([(x, 0), (x, H)], fill=(4, 4, 14, a))
+    for x in range(900):
+        a = int(248 * (1 - x / 900) ** 0.45)
+        gd.line([(x, 0), (x, H)], fill=(2, 3, 10, a))
     img = Image.alpha_composite(img, grad)
 
     # Треугольник-акцент (правая часть)
@@ -227,34 +226,31 @@ def overlay_text(img: Image.Image, vis: dict) -> Image.Image:
     td.polygon([apex, (680, 740), (1440, 740)], fill=(0, 195, 255, 10))
     td.line([apex, (680, 740)],  fill=(0, 195, 255, 130), width=2)
     td.line([apex, (1440, 740)], fill=(0, 195, 255, 30),  width=1)
-    # Кольца у вершины
     for r, a in [(40, 60), (70, 35), (100, 18)]:
         cx, cy = apex
         td.ellipse([cx-r, cy-r, cx+r, cy+r], outline=(0, 195, 255, a), width=1)
-    # Точка вершины
     td.ellipse([apex[0]-5, apex[1]-5, apex[0]+5, apex[1]+5], fill=(0, 220, 255, 220))
-    # Малый треугольник слева
     td.polygon([(55, 620), (30, 665), (80, 665)], fill=(0, 195, 255, 18), outline=(0, 195, 255, 80))
     img = Image.alpha_composite(img, tri)
 
     draw = ImageDraw.Draw(img)
-    ELEC  = (0,   195, 255)
-    GOLD  = (255, 196,   0)
-    WHT   = (238, 240, 248)
-    MUTED = (105, 110, 135)
-    SEP   = ( 22,  26,  50)
+    ELEC  = (0,   210, 255)
+    GOLD  = (255, 205,   0)
+    WHT   = (255, 255, 255)
+    MUTED = (180, 185, 210)
+    SEP   = ( 50,  60, 110)
     LM    = 64
 
     f_h1   = _fnt(BOLD_PATHS, 82)
     f_h2   = _fnt(BOLD_PATHS, 82)
-    f_desc = _fnt(REG_PATHS,  20)
+    f_desc = _fnt(REG_PATHS,  22)
     f_stat = _fnt(BOLD_PATHS, 52)
-    f_lbl  = _fnt(REG_PATHS,  12)
-    f_tag  = _fnt(REG_PATHS,  12)
-    f_hand = _fnt(BOLD_PATHS, 15)
+    f_lbl  = _fnt(REG_PATHS,  15)
+    f_tag  = _fnt(REG_PATHS,  14)
+    f_hand = _fnt(BOLD_PATHS, 17)
 
     # Метка сверху
-    draw.text((LM, 26), "БЕЛЫЙ ТРЕУГОЛЬНИК  ·  МАРКЕТИНГ  ·  @btreygolnik",
+    draw.text((LM, 26), "БЕЛЫЙ ТРЕУГОЛЬНИК  \u00b7  МАРКЕТИНГ  \u00b7  @btreygolnik",
               font=f_tag, fill=MUTED)
     draw.line([(LM, 52), (W - LM - 100, 52)], fill=SEP, width=1)
 
@@ -270,7 +266,7 @@ def overlay_text(img: Image.Image, vis: dict) -> Image.Image:
     y += 32
     for line in _wrap(draw, vis["desc"], f_desc, 580)[:2]:
         draw.text((LM, y), line, font=f_desc, fill=MUTED)
-        y += 28
+        y += 30
 
     # Статистика
     y += 18
@@ -298,9 +294,7 @@ def overlay_text(img: Image.Image, vis: dict) -> Image.Image:
     buf.seek(0)
     return Image.open(buf)
 def create_image(vis: dict) -> bytes:
-    # 1. Пробуем AI-фон
     bg_bytes = generate_bg(vis.get("prompt", "dark tech crypto blockchain"))
-
     if bg_bytes:
         try:
             bg = Image.open(io.BytesIO(bg_bytes)).resize((1280, 720))
@@ -309,10 +303,7 @@ def create_image(vis: dict) -> bytes:
             bg = _solid_bg()
     else:
         bg = _solid_bg()
-
-    # 2. Накладываем текст и дизайн
     result = overlay_text(bg, vis)
-
     buf = io.BytesIO()
     result.save(buf, "PNG")
     buf.seek(0)
@@ -331,24 +322,20 @@ def send_photo(caption: str, image_bytes: bytes) -> dict:
 
 # ── JOB ───────────────────────────────────────────────────────────────────────
 def job():
-    log.info("🚀 Запуск поста...")
+    log.info("Запуск поста...")
     try:
         articles = fetch_articles()
         if not articles:
             log.warning("Нет статей")
             return
-
         post_text, vis = generate_post(articles)
-        log.info(f"✍️  Визуал: {vis['line1']} / {vis['line2']}")
-
+        log.info(f"Визуал: {vis['line1']} / {vis['line2']}")
         image_bytes = create_image(vis)
         result = send_photo(post_text, image_bytes)
-
         if result.get("ok"):
-            log.info("✅ Пост опубликован!")
+            log.info("Пост опубликован!")
         else:
-            log.error(f"❌ Telegram: {result}")
-
+            log.error(f"Telegram: {result}")
     except Exception:
         log.exception("Ошибка в job()")
 
@@ -358,9 +345,9 @@ schedule.every().day.at("11:00").do(job)
 schedule.every().day.at("17:00").do(job)
 
 if __name__ == "__main__":
-    log.info("🤖 Бот «Белый треугольник» запущен")
-    log.info(f"📢 Канал: {CHANNEL}")
-    log.info("🕐 Расписание: 09:00 / 14:00 / 20:00 МСК")
+    log.info("Бот Белый треугольник запущен")
+    log.info(f"Канал: {CHANNEL}")
+    log.info("Расписание: 09:00 / 14:00 / 20:00 МСК")
     job()
     while True:
         schedule.run_pending()
