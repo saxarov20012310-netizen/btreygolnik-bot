@@ -119,8 +119,8 @@ def generate_post(articles):
 Маркетологи, записывайте.
 
 === ВИЗУАЛ ===
-СТРОКА1: [3-4 слова CAPS, главная мысль — только латиница]
-СТРОКА2: [2-3 слова CAPS, ударная фраза — только латиница]
+СТРОКА1: [2-3 слова КАПСОМ по-русски, главная мысль]
+СТРОКА2: [1-2 слова КАПСОМ по-русски, ударная фраза]
 ОПИСАНИЕ: [одно предложение, суть новости, можно по-русски]
 ЦИФРА1: [метрика, например +900%]
 МЕТКА1: [2-3 слова]
@@ -143,8 +143,8 @@ def generate_post(articles):
         return m.group(1).strip() if m else default
 
     vis = {
-        "line1":  ex("СТРОКА1",  "CRYPTO"),
-        "line2":  ex("СТРОКА2",  "MARKETING"),
+        "line1":  ex("СТРОКА1",  "КРИПТА СЕГОДНЯ"),
+        "line2":  ex("СТРОКА2",  "НОВЫЙ ТРЕНД"),
         "desc":   ex("ОПИСАНИЕ", "Тренд, который меняет правила игры"),
         "s1v":    ex("ЦИФРА1",   "+300%"),
         "s1l":    ex("МЕТКА1",   "рост"),
@@ -190,6 +190,15 @@ def _solid_bg() -> Image.Image:
     return img
 
 # ── НАЛОЖЕНИЕ ТЕКСТА НА ФОТО ──────────────────────────────────────────────────
+def _fit_size(draw, text, paths, start, max_w, min_size=44):
+    """Подбирает размер шрифта, чтобы строка влезла в max_w"""
+    size = start
+    f = _fnt(paths, size)
+    while size > min_size and draw.textbbox((0, 0), text, font=f)[2] > max_w:
+        size -= 4
+        f = _fnt(paths, size)
+    return size
+
 def _wrap(draw, text, font, max_w):
     words = text.split()
     lines, cur = [], ""
@@ -225,8 +234,8 @@ def overlay_text(img: Image.Image, vis: dict) -> Image.Image:
     td  = ImageDraw.Draw(tri)
     apex = (1060, 20)
     td.polygon([apex, (680, 740), (1440, 740)], fill=(0, 195, 255, 10))
-    td.line([apex, (680, 740)],  fill=(0, 195, 255, 130), width=2)
-    td.line([apex, (1440, 740)], fill=(0, 195, 255, 30),  width=1)
+    td.line([apex, (680, 740)],  fill=(0, 195, 255, 45), width=2)
+    td.line([apex, (1440, 740)], fill=(0, 195, 255, 25), width=1)
     for r, a in [(40, 60), (70, 35), (100, 18)]:
         cx, cy = apex
         td.ellipse([cx-r, cy-r, cx+r, cy+r], outline=(0, 195, 255, a), width=1)
@@ -243,8 +252,15 @@ def overlay_text(img: Image.Image, vis: dict) -> Image.Image:
     SEP  = ( 50,  60, 110)
     LM   = 64
 
-    f_h1   = _fnt(BOLD_PATHS, 82)
-    f_h2   = _fnt(BOLD_PATHS, 82)
+    MAXW = 690 - LM - 20   # ширина текста внутри плашки
+
+    # Заголовки: общий размер, чтобы обе строки влезли в плашку
+    h_size = min(
+        _fit_size(draw, vis["line1"], BOLD_PATHS, 82, MAXW),
+        _fit_size(draw, vis["line2"], BOLD_PATHS, 82, MAXW),
+    )
+    f_h1   = _fnt(BOLD_PATHS, h_size)
+    f_h2   = f_h1
     f_desc = _fnt(REG_PATHS,  22)
     f_stat = _fnt(BOLD_PATHS, 52)
     f_lbl  = _fnt(REG_PATHS,  15)
@@ -254,39 +270,41 @@ def overlay_text(img: Image.Image, vis: dict) -> Image.Image:
               font=f_tag, fill=MUTED, stroke_width=1, stroke_fill=BLK)
     draw.line([(LM, 52), (W - LM - 100, 52)], fill=SEP, width=1)
 
-    y = 72
+    y = 84
     draw.text((LM, y), vis["line1"], font=f_h1, fill=WHT,
               stroke_width=2, stroke_fill=BLK)
-    y += 92
+    y += h_size + 14
     draw.text((LM, y), vis["line2"], font=f_h2, fill=ELEC,
               stroke_width=2, stroke_fill=BLK)
-    y += 86
+    y += h_size + 26
 
-    draw.text((LM, y), "...", font=f_desc, fill=ELEC, stroke_width=1, stroke_fill=BLK)
-    y += 32
-    for line in _wrap(draw, vis["desc"], f_desc, 580)[:2]:
+    for line in _wrap(draw, vis["desc"], f_desc, MAXW)[:3]:
         draw.text((LM, y), line, font=f_desc, fill=MUTED,
                   stroke_width=1, stroke_fill=BLK)
-        y += 30
+        y += 32
 
-    y += 18
-    draw.line([(LM, y), (560, y)], fill=SEP, width=1)
-    y += 16
-    draw.text((LM, y),       vis["s1v"], font=f_stat, fill=GOLD,
+    # Статистика прижата к низу плашки — композиция не разваливается
+    sy = 500
+    draw.line([(LM, sy), (560, sy)], fill=SEP, width=1)
+    sy += 20
+    # Вторая колонка сдвигается, если первая цифра широкая
+    w1 = draw.textbbox((0, 0), vis["s1v"], font=f_stat)[2]
+    x2 = max(LM + 220, LM + w1 + 48)
+    draw.text((LM, sy), vis["s1v"], font=f_stat, fill=GOLD,
               stroke_width=2, stroke_fill=BLK)
-    draw.text((LM + 200, y), vis["s2v"], font=f_stat, fill=WHT,
+    draw.text((x2, sy), vis["s2v"], font=f_stat, fill=WHT,
               stroke_width=2, stroke_fill=BLK)
-    y += 58
-    draw.text((LM, y),       vis["s1l"].upper(), font=f_lbl, fill=MUTED,
+    sy += 62
+    draw.text((LM, sy), vis["s1l"].upper(), font=f_lbl, fill=MUTED,
               stroke_width=1, stroke_fill=BLK)
-    draw.text((LM + 200, y), vis["s2l"].upper(), font=f_lbl, fill=MUTED,
+    draw.text((x2, sy), vis["s2l"].upper(), font=f_lbl, fill=MUTED,
               stroke_width=1, stroke_fill=BLK)
-    draw.line([(LM + 180, y - 50), (LM + 180, y + 14)], fill=SEP, width=1)
+    draw.line([(x2 - 22, sy - 54), (x2 - 22, sy + 14)], fill=SEP, width=1)
 
     draw.line([(LM, H - 50), (W - LM - 100, H - 50)], fill=SEP, width=1)
     draw.text((LM, H - 34), "@btreygolnik", font=f_hand, fill=ELEC,
               stroke_width=1, stroke_fill=BLK)
-    draw.text((580, H - 32), "маркетинг без воды", font=f_tag, fill=MUTED,
+    draw.text((480, H - 32), "маркетинг без воды", font=f_tag, fill=MUTED,
               stroke_width=1, stroke_fill=BLK)
 
     buf = io.BytesIO()
