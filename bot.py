@@ -75,7 +75,17 @@ def fetch_articles(n=8):
 SYSTEM_PROMPT = """Ты — редактор Telegram-канала «Белый треугольник | Братство» (@btreygolnik).
 Аудитория: маркетологи 18-28 лет, следят за крипто-трендами и growth hacking.
 Стиль: уверенный, острый, без воды. Один инсайт — один пост.
-Никогда не пиши «я думаю» или «возможно»."""
+Никогда не пиши «я думаю» или «возможно». Пиши только по-русски.
+Отвечай ПЛОСКИМ ТЕКСТОМ без Markdown: никаких #, **, *, ---, списков.
+Разделы помечай ровно так: === ТЕКСТ ПОСТА === и === ВИЗУАЛ === — не заменяй эти маркеры ничем."""
+
+def _strip_md(text: str) -> str:
+    """Telegram-подпись не рендерит Markdown — убираем его следы"""
+    text = re.sub(r"^#{1,6}\s*", "", text, flags=re.MULTILINE)      # заголовки
+    text = re.sub(r"\*{1,3}([^*\n]+)\*{1,3}", r"\1", text)          # жирный/курсив
+    text = re.sub(r"^[-_=]{3,}\s*$", "", text, flags=re.MULTILINE)  # ---
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    return text.strip()
 
 def generate_post(articles):
     news = "\n".join(f"[{i+1}] {a['title']}\n{a['summary']}" for i, a in enumerate(articles))
@@ -107,17 +117,25 @@ def generate_post(articles):
 
 Строго два раздела."""}]
     )
-    raw = resp.content[0].text.strip()
+    return _parse_response(resp.content[0].text.strip())
 
-    post_text, vis_text = raw, ""
-    if "=== ТЕКСТ ПОСТА ===" in raw and "=== ВИЗУАЛ ===" in raw:
-        parts     = raw.split("=== ВИЗУАЛ ===")
-        post_text = parts[0].replace("=== ТЕКСТ ПОСТА ===", "").strip()
-        vis_text  = parts[1].strip()
+def _parse_response(raw: str):
+    # Отделяем пост от блока визуала — модель иногда подменяет маркеры Markdown-заголовками
+    m = re.search(r"^\W*={0,3}\s*ВИЗУАЛ\s*={0,3}\s*$", raw, re.MULTILINE)
+    if not m:
+        m = re.search(r"^\W*СТРОКА1", raw, re.MULTILINE)  # последний рубеж
+    if m:
+        post_text, vis_text = raw[:m.start()], raw[m.start():]
+    else:
+        post_text, vis_text = raw, ""
+
+    post_text = re.sub(r"^\W*={0,3}\s*ТЕКСТ ПОСТА\s*={0,3}\s*$", "", post_text, flags=re.MULTILINE)
+    post_text = _strip_md(post_text)[:1024]
 
     def ex(key, default):
-        m = re.search(rf"^{key}:\s*(.+)$", vis_text, re.MULTILINE)
-        return m.group(1).strip() if m else default
+        # терпим Markdown вокруг ключа: **СТРОКА1:** значение
+        m = re.search(rf"^[\*#\s]*{key}[\*\s]*:[\*\s]*(.+)$", vis_text, re.MULTILINE)
+        return m.group(1).strip(" *") if m else default
 
     vis = {
         "line1":  ex("СТРОКА1",  "КРИПТА СЕГОДНЯ"),
