@@ -31,37 +31,16 @@ FEEDS = [
     "https://cryptopotato.com/feed/",
 ]
 # ── ШРИФТЫ ────────────────────────────────────────────────────────────────────
-FONT_DIR = "/tmp/btfonts"
-
-def _dl(url, dest):
-    try:
-        r = requests.get(url, timeout=20)
-        if r.status_code == 200 and len(r.content) > 10000:
-            open(dest, "wb").write(r.content)
-            return True
-    except:
-        pass
-    return False
-
-def _ensure_fonts():
-    os.makedirs(FONT_DIR, exist_ok=True)
-    for name, url in {
-        "Inter-Bold.ttf":    "https://github.com/rsms/inter/raw/master/docs/font-files/Inter-Bold.ttf",
-        "Inter-Regular.ttf": "https://github.com/rsms/inter/raw/master/docs/font-files/Inter-Regular.ttf",
-    }.items():
-        dest = f"{FONT_DIR}/{name}"
-        if not (os.path.exists(dest) and os.path.getsize(dest) > 10000):
-            _dl(url, dest)
-
-_ensure_fonts()
+# Inter лежит в репозитории (fonts/) — не зависим ни от скачивания, ни от системы
+FONT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fonts")
 
 BOLD_PATHS = [
-    f"{FONT_DIR}/Inter-Bold.ttf",
+    os.path.join(FONT_DIR, "Inter-Bold.ttf"),
     "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
     "/usr/share/fonts/truetype/noto/NotoSans-Bold.ttf",
 ]
 REG_PATHS = [
-    f"{FONT_DIR}/Inter-Regular.ttf",
+    os.path.join(FONT_DIR, "Inter-Regular.ttf"),
     "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
     "/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf",
 ]
@@ -69,13 +48,11 @@ REG_PATHS = [
 def _fnt(paths, size):
     for p in paths:
         try:
-            f = ImageFont.truetype(p, size)
-            log.info(f"Font OK: {p} @{size}")
-            return f
-        except:
+            return ImageFont.truetype(p, size)
+        except Exception:
             pass
-    log.warning(f"Font fallback @{size}")
-    return ImageFont.load_default()
+    # Битмап-fallback не умеет кириллицу — лучше не публиковать пост вовсе
+    raise RuntimeError(f"Не найден ни один шрифт: {paths}")
 
 # ── RSS ───────────────────────────────────────────────────────────────────────
 def fetch_articles(n=8):
