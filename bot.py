@@ -5,7 +5,7 @@
 Картинки: Pollinations.ai (бесплатный AI) → PIL текст-оверлей
 """
 
-import os, sys, io, re, time, random, logging, urllib.parse
+import os, sys, io, re, json, time, random, logging, urllib.parse
 import schedule, feedparser, requests
 from PIL import Image, ImageDraw, ImageFont
 from anthropic import Anthropic
@@ -71,6 +71,36 @@ def fetch_articles(n=8):
         if len(articles) >= n:
             break
     return articles[:n]
+# ── ПАМЯТЬ: ПОСЛЕДНИЕ ПОСТЫ ───────────────────────────────────────────────────
+# На Railway с volume история переживает редеплой (/data), иначе живёт до рестарта
+HISTORY_PATH = os.environ.get(
+    "HISTORY_PATH",
+    "/data/post_history.json" if os.path.isdir("/data")
+    else os.path.join(os.path.dirname(os.path.abspath(__file__)), "post_history.json")
+)
+HISTORY_LIMIT = 15
+
+def load_history():
+    try:
+        with open(HISTORY_PATH, encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return []
+
+def save_history_entry(post_text, vis):
+    hist = load_history()
+    hist.append({
+        "date": time.strftime("%Y-%m-%d %H:%M"),
+        "headline": f"{vis['line1']} / {vis['line2']}",
+        "text": post_text[:300],
+    })
+    hist = hist[-HISTORY_LIMIT:]
+    try:
+        with open(HISTORY_PATH, "w", encoding="utf-8") as f:
+            json.dump(hist, f, ensure_ascii=False, indent=1)
+    except Exception as e:
+        log.warning(f"История не сохранилась: {e}")
+
 # ── CLAUDE: ГЕНЕРАЦИЯ ПОСТА + ВИЗУАЛА ─────────────────────────────────────────
 SYSTEM_PROMPT = """Ты — редактор Telegram-канала «Белый треугольник | Братство» (@btreygolnik).
 Аудитория: маркетологи 18-28 лет, следят за крипто-трендами и growth hacking.
@@ -89,11 +119,24 @@ def _strip_md(text: str) -> str:
 
 def generate_post(articles):
     news = "\n".join(f"[{i+1}] {a['title']}\n{a['summary']}" for i, a in enumerate(articles))
+
+    hist_block = ""
+    history = load_history()
+    if history:
+        recent = "\n".join(f"- [{h['date']}] {h['text']}" for h in history[-7:])
+        hist_block = f"""Последние посты канала:
+{recent}
+
+Не повторяй темы из этих постов и не противоречь им. Если новость уже была освещена —
+возьми другую или найди новый угол. Если ситуация изменилась (был рост, стало падение) —
+прямо скажи об этом развороте, а не делай вид, что прошлого поста не было.
+
+"""
     resp = client.messages.create(
         model="claude-haiku-4-5-20251001",
         max_tokens=1100,
         system=SYSTEM_PROMPT,
-        messages=[{"role": "user", "content": f"""Свежие новости:
+        messages=[{"role": "user", "content": f"""{hist_block}Свежие новости:
 {news}
 
 Выбери ОДНУ самую взрывную новость. Напиши пост и данные для картинки.
@@ -345,6 +388,7 @@ def job():
         result = send_photo(post_text, image_bytes)
         if result.get("ok"):
             log.info("Пост опубликован!")
+            save_history_entry(post_text, vis)
         else:
             log.error(f"Telegram: {result}")
     except Exception:
