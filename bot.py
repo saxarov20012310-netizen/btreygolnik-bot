@@ -261,7 +261,7 @@ def overlay_text(img: Image.Image, vis: dict) -> Image.Image:
     f_lbl  = _fnt(REG_PATHS,  15)
     f_tag  = _fnt(REG_PATHS,  14)
     f_hand = _fnt(BOLD_PATHS, 17)
-    draw.text((LM, 26), "БЕЛЫЙ ТРЕУГОЛЬНИК  \u00b7  МАРКЕТИНГ  \u00b7  @btreygolnik",
+    draw.text((LM, 26), "БЕЛЫЙ ТРЕУГОЛЬНИК  \u00b7  @btreygolnik",
               font=f_tag, fill=MUTED, stroke_width=1, stroke_fill=BLK)
     draw.line([(LM, 52), (W - LM - 100, 52)], fill=SEP, width=1)
 
@@ -298,8 +298,6 @@ def overlay_text(img: Image.Image, vis: dict) -> Image.Image:
 
     draw.line([(LM, H - 50), (W - LM - 100, H - 50)], fill=SEP, width=1)
     draw.text((LM, H - 34), "@btreygolnik", font=f_hand, fill=ELEC,
-              stroke_width=1, stroke_fill=BLK)
-    draw.text((480, H - 32), "маркетинг без воды", font=f_tag, fill=MUTED,
               stroke_width=1, stroke_fill=BLK)
 
     buf = io.BytesIO()
