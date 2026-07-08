@@ -2,10 +2,12 @@
 """
 Белый Треугольник | Автопилот
 3 поста в день для @btreygolnik
-Картинки: Pollinations.ai (бесплатный AI) → PIL текст-оверлей
+Картинки: чередование стилей — живое фото из статьи / фотореалистичный AI-кадр /
+фирменный шаблон (Pollinations.ai → PIL текст-оверлей)
 """
 
 import os, sys, io, re, json, time, random, logging, urllib.parse
+import html as html_mod
 import schedule, feedparser, requests
 from PIL import Image, ImageDraw, ImageFont
 from anthropic import Anthropic
@@ -55,6 +57,19 @@ def _fnt(paths, size):
     raise RuntimeError(f"Не найден ни один шрифт: {paths}")
 
 # ── RSS ───────────────────────────────────────────────────────────────────────
+def _entry_image(e) -> str | None:
+    """Достаёт URL картинки статьи из RSS-записи (media:content, enclosure, <img>)"""
+    for key in ("media_content", "media_thumbnail"):
+        for m in e.get(key) or []:
+            u = m.get("url")
+            if u:
+                return u
+    for l in e.get("links") or []:
+        if l.get("rel") == "enclosure" and str(l.get("type", "")).startswith("image"):
+            return l.get("href")
+    m = re.search(r'<img[^>]+src=["\']([^"\']+)', e.get("summary", e.get("description", "")))
+    return m.group(1) if m else None
+
 def fetch_articles(n=8):
     articles = []
     random.shuffle(FEEDS)
@@ -65,7 +80,8 @@ def fetch_articles(n=8):
                 title   = e.get("title", "").strip()
                 summary = re.sub(r"<[^>]+>", "", e.get("summary", e.get("description", ""))).strip()[:350]
                 if title:
-                    articles.append({"title": title, "summary": summary})
+                    articles.append({"title": title, "summary": summary,
+                                     "image": _entry_image(e)})
         except Exception as ex:
             log.warning(f"Feed {url}: {ex}")
         if len(articles) >= n:
@@ -117,8 +133,25 @@ def _strip_md(text: str) -> str:
     text = re.sub(r"\n{3,}", "\n\n", text)
     return text.strip()
 
+# Форматы постов — каждый раз случайный, чтобы лента не выглядела конвейером
+POST_FORMATS = [
+    "Классика: эмодзи + заголовок, затем 3-4 предложения (суть + почему важно), "
+    "в конце вывод одной фразой.",
+    "Горячее мнение: заголовок-тезис, почему большинство ошибается насчёт этой новости, "
+    "твой контраргумент с фактами, дерзкий вывод.",
+    "Список: эмодзи + заголовок, затем 3 коротких пункта-факта (каждый с новой строки, "
+    "начинай пункт с эмодзи ▪️ или ⚡), финальная фраза-вывод.",
+    "Вопрос-крючок: начни с провокационного вопроса по новости, ответь на него фактами "
+    "в 2-3 предложениях, закончи выводом.",
+    "Цифра дня: начни с самой впечатляющей цифры новости (крупно, в первой строке), "
+    "затем раскрути, что за ней стоит и что это меняет.",
+    "Практика: новость в одном предложении, затем строка «Что это значит для тебя:» "
+    "и 2-3 коротких практических тезиса.",
+]
+
 def generate_post(articles):
     news = "\n".join(f"[{i+1}] {a['title']}\n{a['summary']}" for i, a in enumerate(articles))
+    fmt = random.choice(POST_FORMATS)
 
     hist_block = ""
     history = load_history()
@@ -141,14 +174,14 @@ def generate_post(articles):
 
 Выбери ОДНУ самую взрывную новость. Напиши пост и данные для картинки.
 
+Формат поста в этот раз: {fmt}
+Первая строка поста — всегда цепляющий заголовок. Объём — до 900 знаков.
+
 === ТЕКСТ ПОСТА ===
-[Эмодзи + заголовок]
-
-[3-4 предложения: суть новости + почему это важно и что с этим делать]
-
-[Короткий вывод одной фразой — каждый раз разной, без шаблонных обращений]
+[пост строго в указанном формате]
 
 === ВИЗУАЛ ===
+НОМЕР: [число — номер выбранной новости из списка, например 3]
 СТРОКА1: [2-3 слова КАПСОМ по-русски, главная мысль]
 СТРОКА2: [1-2 слова КАПСОМ по-русски, ударная фраза]
 ОПИСАНИЕ: [одно предложение, суть новости, можно по-русски]
@@ -180,7 +213,9 @@ def _parse_response(raw: str):
         m = re.search(rf"^[\*#\s]*{key}[\*\s]*:[\*\s]*(.+)$", vis_text, re.MULTILINE)
         return m.group(1).strip(" *") if m else default
 
+    idx_m = re.search(r"\d+", ex("НОМЕР", ""))
     vis = {
+        "idx":    int(idx_m.group()) - 1 if idx_m else None,  # 0-based индекс статьи
         "line1":  ex("СТРОКА1",  "КРИПТА СЕГОДНЯ"),
         "line2":  ex("СТРОКА2",  "НОВЫЙ ТРЕНД"),
         "desc":   ex("ОПИСАНИЕ", "Тренд, который меняет правила игры"),
@@ -192,16 +227,9 @@ def _parse_response(raw: str):
     }
     return post_text, vis
 # ── AI ФОТОФОН: Pollinations.ai ───────────────────────────────────────────────
-def generate_bg(vis_prompt: str) -> bytes | None:
-    """Бесплатная AI-генерация фона — Pollinations.ai (без API-ключа)"""
-    base_prompt = (
-        f"dark cinematic wallpaper, {vis_prompt}, "
-        "deep navy black background, glowing blue geometric shapes, "
-        "professional marketing design, no text, no letters, no words, "
-        "ultra sharp, 4K, dramatic lighting"
-    )
+def _pollinations(prompt: str) -> bytes | None:
     seed = random.randint(1000, 99999)
-    encoded = urllib.parse.quote(base_prompt)
+    encoded = urllib.parse.quote(prompt)
     url = (
         f"https://image.pollinations.ai/prompt/{encoded}"
         f"?width=1280&height=720&nologo=true&seed={seed}&model=flux"
@@ -216,6 +244,87 @@ def generate_bg(vis_prompt: str) -> bytes | None:
     except Exception as e:
         log.warning(f"Pollinations ошибка: {e}")
     return None
+
+def generate_bg(vis_prompt: str) -> bytes | None:
+    """Фон для фирменного шаблона — тёмный, геометрия, под плашку"""
+    return _pollinations(
+        f"dark cinematic wallpaper, {vis_prompt}, "
+        "deep navy black background, glowing blue geometric shapes, "
+        "professional marketing design, no text, no letters, no words, "
+        "ultra sharp, 4K, dramatic lighting"
+    )
+
+# Стили «живых» кадров — тоже ротация, чтобы фото не были однотипными
+PHOTO_LOOKS = [
+    "shot on professional camera, cinematic lighting, shallow depth of field",
+    "dramatic macro close-up, studio lighting, dark background",
+    "night city scene, neon reflections, rain on glass",
+    "top-down flat lay composition, hard directional light",
+    "documentary photography, natural light, candid moment",
+    "epic wide angle, golden hour light, atmospheric haze",
+]
+
+def generate_photo_bg(vis_prompt: str) -> bytes | None:
+    """«Живой» кадр — как редакционное фото к новости, без плашек и графики"""
+    look = random.choice(PHOTO_LOOKS)
+    return _pollinations(
+        f"photorealistic editorial news photograph, {vis_prompt}, {look}, "
+        "rich detail, realistic textures, no text, no letters, no watermark, no logo"
+    )
+
+# ── ЖИВЫЕ КАРТИНКИ: фото статьи / AI-фото + водяной знак ─────────────────────
+def download_article_image(url: str) -> Image.Image | None:
+    """Скачивает оригинальную картинку новости; мелкие превью отбрасываем"""
+    try:
+        r = requests.get(url, timeout=30,
+                         headers={"User-Agent": "Mozilla/5.0 (compatible; btbot/1.0)"})
+        r.raise_for_status()
+        img = Image.open(io.BytesIO(r.content))
+        img.load()
+        if img.width < 500 or img.height < 280:
+            log.info(f"Картинка статьи слишком мелкая ({img.width}x{img.height}) — пропуск")
+            return None
+        img = img.convert("RGB")
+        if img.width > 1600:
+            img = img.resize((1600, int(img.height * 1600 / img.width)))
+        return img
+    except Exception as e:
+        log.warning(f"Картинка статьи не скачалась: {e}")
+        return None
+
+def _watermark(img: Image.Image) -> Image.Image:
+    """Маленькая подпись канала в углу — единственный брендинг «живых» постов"""
+    img = img.convert("RGBA")
+    layer = Image.new("RGBA", img.size, (0, 0, 0, 0))
+    d = ImageDraw.Draw(layer)
+    f = _fnt(BOLD_PATHS, max(18, img.width // 55))
+    text = "@btreygolnik"
+    bbox = d.textbbox((0, 0), text, font=f)
+    x = img.width - bbox[2] + bbox[0] - 24
+    y = img.height - bbox[3] + bbox[1] - 20
+    d.text((x, y), text, font=f, fill=(255, 255, 255, 200),
+           stroke_width=2, stroke_fill=(0, 0, 0, 150))
+    return Image.alpha_composite(img, layer).convert("RGB")
+
+def _img_bytes(img: Image.Image) -> bytes:
+    buf = io.BytesIO()
+    img.save(buf, "PNG")
+    return buf.getvalue()
+
+def create_article_image(url: str) -> bytes | None:
+    img = download_article_image(url)
+    return _img_bytes(_watermark(img)) if img else None
+
+def create_photo_image(vis: dict) -> bytes | None:
+    bg = generate_photo_bg(vis.get("prompt", "crypto market news"))
+    if not bg:
+        return None
+    try:
+        img = Image.open(io.BytesIO(bg)).resize((1280, 720))
+    except Exception as e:
+        log.warning(f"Не удалось открыть AI-фото: {e}")
+        return None
+    return _img_bytes(_watermark(img))
 
 def _solid_bg() -> Image.Image:
     """Запасной фон — градиент тёмно-синего"""
@@ -364,15 +473,34 @@ def create_image(vis: dict) -> bytes:
     return buf.read()
 
 # ── TELEGRAM ──────────────────────────────────────────────────────────────────
-def send_photo(caption: str, image_bytes: bytes) -> dict:
+def html_caption(text: str) -> str:
+    """Первая строка — жирный заголовок (как у живых каналов), остальное как есть"""
+    text = text.strip()
+    head, sep, rest = text.partition("\n")
+    return f"<b>{html_mod.escape(head.strip())}</b>{sep}{html_mod.escape(rest)}"
+
+def send_photo(caption: str, image_bytes: bytes, parse_mode: str | None = None) -> dict:
     url = f"https://api.telegram.org/bot{TG_TOKEN}/sendPhoto"
+    data = {"chat_id": CHANNEL, "caption": caption}
+    if parse_mode:
+        data["parse_mode"] = parse_mode
     r = requests.post(
         url,
-        data={"chat_id": CHANNEL, "caption": caption},
+        data=data,
         files={"photo": ("post.png", image_bytes, "image/png")},
         timeout=30,
     )
     return r.json()
+
+# ── ВЫБОР СТИЛЯ КАРТИНКИ ──────────────────────────────────────────────────────
+def pick_style(has_article_img: bool) -> str:
+    """40% фирменный шаблон, остальное — «живые»: фото статьи или AI-кадр"""
+    r = random.random()
+    if r < 0.40:
+        return "branded"
+    if r < 0.75 and has_article_img:
+        return "article"
+    return "photo"
 
 # ── JOB ───────────────────────────────────────────────────────────────────────
 def job():
@@ -384,8 +512,29 @@ def job():
             return
         post_text, vis = generate_post(articles)
         log.info(f"Визуал: {vis['line1']} / {vis['line2']}")
-        image_bytes = create_image(vis)
-        result = send_photo(post_text, image_bytes)
+
+        idx = vis.get("idx")
+        art = articles[idx] if idx is not None and 0 <= idx < len(articles) else None
+        art_img_url = (art or {}).get("image")
+
+        style = pick_style(bool(art_img_url))
+        image_bytes = None
+        if style == "article":
+            image_bytes = create_article_image(art_img_url)
+            if not image_bytes:
+                style = "photo"
+        if style == "photo" and not image_bytes:
+            image_bytes = create_photo_image(vis)
+            if not image_bytes:
+                style = "branded"
+        if not image_bytes:
+            image_bytes = create_image(vis)
+        log.info(f"Стиль картинки: {style}")
+
+        result = send_photo(html_caption(post_text), image_bytes, parse_mode="HTML")
+        if not result.get("ok"):
+            log.warning(f"HTML-подпись не прошла ({result}), пробую без разметки")
+            result = send_photo(post_text, image_bytes)
         if result.get("ok"):
             log.info("Пост опубликован!")
             save_history_entry(post_text, vis)
